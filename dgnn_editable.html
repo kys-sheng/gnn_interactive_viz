@@ -113,12 +113,12 @@ const PH=['Init','Messages','Aggregate','Update'];
 const FORM=['h\u1d65\u2070=x_v','m\u1d64\u1d65=M(h\u1d64,h\u1d65)','M\u1d65=AGG({m\u1d64\u1d65:u\u2208N(v)})','h\u1d65\u207a=ReLU(W\u00b7[h\u1d65\u2016M\u1d65])'];
 const DESC=[
   t=>`t=${t}: ${TEVENTS[t].note}. `+(t===0?'Drag nodes in feature space or adjust kNN to change which edges form.':'Positions evolved from your t=0 layout.'),
-  t=>`t=${t}: neighbors of v0 send messages — arrows animate in both panels.`,
-  t=>`t=${t}: messages pooled into M_v0. Centroid shown as dashed marker in feature space.`,
-  t=>`t=${t}: v0 updated — watch it slide toward its neighborhood centroid.`,
+  t=>`t=${t}: every node sends messages to its neighbors simultaneously — particles travel both ways along each edge.`,
+  t=>`t=${t}: each node pools incoming messages into its local centroid M_v (dashed dots).`,
+  t=>`t=${t}: all nodes update — watch the entire cloud shift toward neighborhood centroids.`,
 ];
 
-const T_MAX=5,FOCUS=0;
+const T_MAX=5;
 let curT=0,curP=0,curK=1,curKNN=2,trail=false,playing=false,ptimer=null;
 let ap=0,afr=null;
 let gpos=D_GPOS.map(p=>[...p]);
@@ -189,26 +189,32 @@ function drawGraph(){
   ctx.clearRect(0,0,W,H);
   const es=edges(curT);const knnSet=new Set(computeKNN(curKNN).map(e=>e[0]+'-'+e[1]));
   const newTempEdges=new Set(curT>0?TEVENTS[curT].edges.map(e=>Math.min(e[0],e[1])+'-'+Math.max(e[0],e[1])):[]);
-  const nb=curP>=1?nbrs(FOCUS,curT):[];const ms=new Set(nb.map(n=>Math.min(n,FOCUS)+'-'+Math.max(n,FOCUS)));
   es.forEach(([u,v])=>{
     const key=Math.min(u,v)+'-'+Math.max(u,v);
-    const isM=curP>=1&&ms.has(key);const isKnn=knnSet.has(key);const isNew=newTempEdges.has(key)&&!isKnn;
+    const isKnn=knnSet.has(key);const isNew=newTempEdges.has(key)&&!isKnn;
     const x0=sc(gpos[u][0],W,pad),y0=sc(gpos[u][1],H,pad),x1=sc(gpos[v][0],W,pad),y1=sc(gpos[v][1],H,pad);
-    ctx.lineWidth=isM?2:isNew?1.5:isKnn?1:.75;
-    ctx.strokeStyle=isM?NC:isNew?'#378ADD':isKnn?(dark?'rgba(255,255,255,0.35)':'rgba(0,0,0,0.25)'):BD;
-    ctx.globalAlpha=isM?1:isNew?.85:isKnn?.6:.4;ctx.setLineDash(isKnn&&!isNew?[3,3]:[]);
-    ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();ctx.setLineDash([]);
-    if(isM&&ap>0){const a=Math.min(1,ap);ctx.globalAlpha=1;ctx.fillStyle=NC;ctx.beginPath();ctx.arc(x0+(x1-x0)*a,y0+(y1-y0)*a,4,0,Math.PI*2);ctx.fill();}
-    ctx.globalAlpha=1;
+    ctx.lineWidth=isNew?1.5:isKnn?1:.75;
+    ctx.strokeStyle=isNew?'#378ADD':isKnn?(dark?'rgba(255,255,255,0.35)':'rgba(0,0,0,0.25)'):BD;
+    ctx.globalAlpha=isNew?.85:isKnn?.6:.4;ctx.setLineDash(isKnn&&!isNew?[3,3]:[]);
+    ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
+    if(curP===1&&ap>0){
+      const a=Math.min(1,ap);
+      ctx.fillStyle=NC;ctx.globalAlpha=.8;
+      ctx.beginPath();ctx.arc(x0+(x1-x0)*a,y0+(y1-y0)*a,3.5,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(x1+(x0-x1)*a,y1+(y0-y1)*a,3.5,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+    }
   });
   NODES.forEach(n=>{
     const x=sc(gpos[n.id][0],W,pad),y=sc(gpos[n.id][1],H,pad);
-    const iF=n.id===FOCUS&&curP>0,iN=nb.includes(n.id)&&curP>=1,iU=curP===3&&n.id===FOCUS,iD=gdrag===n.id,r=iF||iN?10:8;
-    if(iF||iN||iU||iD){ctx.beginPath();ctx.arc(x,y,r+5,0,Math.PI*2);ctx.fillStyle=NL;ctx.globalAlpha=iD?.55:.35;ctx.fill();ctx.globalAlpha=1;}
-    ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=(iF||iN||iU||iD)?NC:NL;ctx.fill();
+    const hasNbr=nbrs(n.id,curT).length>0;
+    const isActive=(curP===1||curP===2||curP===3)&&hasNbr;
+    const iD=gdrag===n.id,r=8;
+    if(isActive||iD){ctx.beginPath();ctx.arc(x,y,r+5,0,Math.PI*2);ctx.fillStyle=NL;ctx.globalAlpha=iD?.55:.3;ctx.fill();ctx.globalAlpha=1;}
+    ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=(isActive||iD)?NC:NL;ctx.fill();
     ctx.strokeStyle=BG;ctx.lineWidth=iD?2:1.5;ctx.stroke();
-    if(curP===2&&n.id===FOCUS){ctx.beginPath();ctx.arc(x,y,r+7,0,Math.PI*2);ctx.strokeStyle=NC;ctx.lineWidth=1.5;ctx.setLineDash([3,3]);ctx.globalAlpha=.6;ctx.stroke();ctx.globalAlpha=1;ctx.setLineDash([]);}
-    ctx.font='10px sans-serif';ctx.fillStyle=(iF||iN||iU||iD)?'#fff':NC;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(n.lbl,x,y);
+    if(curP===2&&hasNbr){ctx.beginPath();ctx.arc(x,y,r+7,0,Math.PI*2);ctx.strokeStyle=NC;ctx.lineWidth=1.5;ctx.setLineDash([3,3]);ctx.globalAlpha=.5+ap*.3;ctx.stroke();ctx.globalAlpha=1;ctx.setLineDash([]);}
+    ctx.font='10px sans-serif';ctx.fillStyle=(isActive||iD)?'#fff':NC;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(n.lbl,x,y);
   });
 }
 
@@ -229,9 +235,11 @@ function drawFeature(){
   ['0','0.5','1'].forEach((l,i)=>ctx.fillText(l,sc(i*.5,W,pad),H-pad+11));
   ctx.textAlign='right';['0','0.5','1'].forEach((l,i)=>ctx.fillText(l,pad-3,H-sc(i*.5,H,pad)+3));
 
-  const f=editable?ifeat:feats(curT,curK);
-  const pf=feats(curT,curK);
-  const nb=curP>=1?nbrs(FOCUS,curT):[];
+  const preFeat=curT===0?ifeat:feats(curT-1,curK);
+  const postFeat=feats(curT,curK);
+  const f=editable?ifeat:(curP<3?preFeat:postFeat);
+  const pf=preFeat;
+  const allEdges=editable?[]:edges(curT);
 
   if(editable){
     const knnEdges=computeKNN(curKNN);
@@ -248,32 +256,47 @@ function drawFeature(){
       NODES.forEach(n=>{const x0=sc(a[n.id][0],W,pad),y0=H-sc(a[n.id][1],H,pad),x1=sc(b[n.id][0],W,pad),y1=H-sc(b[n.id][1],H,pad);ctx.strokeStyle=NC;ctx.globalAlpha=.15;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();ctx.globalAlpha=1;});
     }
   }
-  if(curP===2&&!editable&&nb.length>0){
-    const ag=[0,0];nb.forEach(ni=>{ag[0]+=pf[ni][0];ag[1]+=pf[ni][1];});ag[0]/=nb.length;ag[1]/=nb.length;
-    const cx=sc(ag[0],W,pad),cy=H-sc(ag[1],H,pad),fx=sc(pf[FOCUS][0],W,pad),fy=H-sc(pf[FOCUS][1],H,pad);
-    ctx.strokeStyle=NC;ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.globalAlpha=.5;ctx.beginPath();ctx.moveTo(fx,fy);ctx.lineTo(cx,cy);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
-    ctx.beginPath();ctx.arc(cx,cy,5,0,Math.PI*2);ctx.fillStyle=NC;ctx.globalAlpha=.55;ctx.fill();ctx.globalAlpha=1;
-    ctx.font='10px sans-serif';ctx.fillStyle=NC;ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.fillText('M_v',cx,cy-9);
-  }
   if(curP===1&&!editable){
-    nb.forEach(ni=>{
-      const nx=sc(pf[ni][0],W,pad),ny=H-sc(pf[ni][1],H,pad),fx=sc(pf[FOCUS][0],W,pad),fy=H-sc(pf[FOCUS][1],H,pad);
-      const a=Math.min(1,ap),ax=nx+(fx-nx)*a,ay=ny+(fy-ny)*a;
-      ctx.strokeStyle=NC;ctx.lineWidth=1;ctx.globalAlpha=.3;ctx.beginPath();ctx.moveTo(nx,ny);ctx.lineTo(ax,ay);ctx.stroke();
-      ctx.globalAlpha=.85;ctx.beginPath();ctx.arc(ax,ay,4,0,Math.PI*2);ctx.fillStyle=NC;ctx.fill();ctx.globalAlpha=1;
+    allEdges.forEach(([u,v])=>{
+      const ux=sc(pf[u][0],W,pad),uy=H-sc(pf[u][1],H,pad);
+      const vx=sc(pf[v][0],W,pad),vy=H-sc(pf[v][1],H,pad);
+      const a=Math.min(1,ap);
+      ctx.strokeStyle=NC;ctx.lineWidth=.75;ctx.globalAlpha=.2;
+      ctx.beginPath();ctx.moveTo(ux,uy);ctx.lineTo(vx,vy);ctx.stroke();
+      ctx.globalAlpha=.75;ctx.fillStyle=NC;
+      ctx.beginPath();ctx.arc(ux+(vx-ux)*a,uy+(vy-uy)*a,3,0,Math.PI*2);ctx.fill();
+      ctx.beginPath();ctx.arc(vx+(ux-vx)*a,vy+(uy-vy)*a,3,0,Math.PI*2);ctx.fill();
+      ctx.globalAlpha=1;
+    });
+  }
+  if(curP===2&&!editable){
+    NODES.forEach(n=>{
+      const nb=nbrs(n.id,curT);if(!nb.length)return;
+      const ag=[0,0];nb.forEach(ni=>{ag[0]+=pf[ni][0];ag[1]+=pf[ni][1];});ag[0]/=nb.length;ag[1]/=nb.length;
+      const cx=sc(ag[0],W,pad),cy=H-sc(ag[1],H,pad);
+      const nx=sc(pf[n.id][0],W,pad),ny=H-sc(pf[n.id][1],H,pad);
+      ctx.strokeStyle=NC;ctx.lineWidth=1;ctx.setLineDash([2,3]);ctx.globalAlpha=.35;
+      ctx.beginPath();ctx.moveTo(nx,ny);ctx.lineTo(cx,cy);ctx.stroke();
+      ctx.setLineDash([]);ctx.globalAlpha=1;
+      ctx.beginPath();ctx.arc(cx,cy,4,0,Math.PI*2);ctx.fillStyle=NC;ctx.globalAlpha=.45;ctx.fill();ctx.globalAlpha=1;
     });
   }
   NODES.forEach(n=>{
-    const iF=n.id===FOCUS&&curP>0&&!editable,iN=nb.includes(n.id)&&!editable,iD=fdrag===n.id;
+    const iD=fdrag===n.id;
+    const hasNbr=!editable&&nbrs(n.id,curT).length>0;
+    const isActive=(curP===1||curP===2||curP===3)&&hasNbr&&!editable;
     let fx=f[n.id][0],fy=f[n.id][1];
-    if(curP===3&&!editable&&n.id===FOCUS){const nf=feats(Math.min(curT+1,T_MAX),curK);fx=pf[n.id][0]+(nf[n.id][0]-pf[n.id][0])*Math.min(1,ap);fy=pf[n.id][1]+(nf[n.id][1]-pf[n.id][1])*Math.min(1,ap);}
-    const x=sc(fx,W,pad),y=H-sc(fy,H,pad),r=iF?8:iN?7:6;
-    if(editable||iF||iN){ctx.beginPath();ctx.arc(x,y,r+5,0,Math.PI*2);ctx.fillStyle=NL;ctx.globalAlpha=iD?.6:.25;ctx.fill();ctx.globalAlpha=1;}
-    ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=(iF||iN||iD||editable)?NC:NL;ctx.fill();
+    if(curP===3&&!editable){
+      fx=preFeat[n.id][0]+(postFeat[n.id][0]-preFeat[n.id][0])*Math.min(1,ap);
+      fy=preFeat[n.id][1]+(postFeat[n.id][1]-preFeat[n.id][1])*Math.min(1,ap);
+    }
+    const x=sc(fx,W,pad),y=H-sc(fy,H,pad),r=6;
+    if(editable||isActive){ctx.beginPath();ctx.arc(x,y,r+4,0,Math.PI*2);ctx.fillStyle=NL;ctx.globalAlpha=iD?.6:.22;ctx.fill();ctx.globalAlpha=1;}
+    ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=(isActive||iD||editable)?NC:NL;ctx.fill();
     ctx.strokeStyle=BG;ctx.lineWidth=iD?2:1.5;ctx.stroke();
     if(iD&&editable){ctx.beginPath();ctx.arc(x,y,r+2,0,Math.PI*2);ctx.strokeStyle=NC;ctx.lineWidth=1.5;ctx.stroke();}
     ctx.font='10px sans-serif';
-    ctx.fillStyle=(editable||iF||iN)?'#fff':NC;
+    ctx.fillStyle=(editable||isActive)?'#fff':NC;
     ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(n.lbl,x,y);
     if(editable){ctx.font='8px sans-serif';ctx.fillStyle=FGM;ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.fillText(`${fx.toFixed(2)},${fy.toFixed(2)}`,x,y-r-4);}
     else{ctx.font='9px sans-serif';ctx.fillStyle=FG;ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.fillText(n.lbl,x,y-r-3);}
