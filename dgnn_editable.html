@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>DGNN — editable feature space</title>
+<title>GNN forward pass — directed kNN</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:system-ui,sans-serif;background:#fff;color:#3d3d3a;padding:1rem}
@@ -29,18 +29,18 @@ canvas{display:block;width:100%}
 .ld{width:9px;height:9px;border-radius:50%;flex-shrink:0}
 .tl{display:flex;align-items:stretch;border:0.5px solid rgba(0,0,0,0.12);border-radius:8px;overflow:hidden;margin-bottom:.85rem}
 @media(prefers-color-scheme:dark){.tl{border-color:rgba(255,255,255,0.12)}}
-.tl-t{display:flex;flex-direction:column;flex:1;min-width:0;border-right:0.5px solid rgba(0,0,0,0.2)}
+.tl-t{display:flex;flex-direction:column;flex:1;min-width:0;border-right:0.5px solid rgba(0,0,0,0.15)}
 .tl-t:last-child{border-right:none}
-@media(prefers-color-scheme:dark){.tl-t{border-right-color:rgba(255,255,255,0.15)}}
+@media(prefers-color-scheme:dark){.tl-t{border-right-color:rgba(255,255,255,0.12)}}
 .tl-h{font-size:10px;font-weight:500;color:#aaa;padding:4px 0 3px;text-align:center;border-bottom:0.5px solid rgba(0,0,0,0.1);background:rgba(0,0,0,0.03)}
-@media(prefers-color-scheme:dark){.tl-h{background:rgba(255,255,255,0.04);border-bottom-color:rgba(255,255,255,0.1)}}
+@media(prefers-color-scheme:dark){.tl-h{background:rgba(255,255,255,0.04);border-bottom-color:rgba(255,255,255,0.08)}}
 .tl-ps{display:flex}
 .tl-p{flex:1;font-size:9px;text-align:center;padding:5px 2px;cursor:pointer;color:#aaa;border-right:0.5px solid rgba(0,0,0,0.08);transition:background .12s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tl-p:last-child{border-right:none}
 .tl-p:hover{background:rgba(0,0,0,0.05)}
 .tl-p.active{background:rgba(0,0,0,0.07);color:#3d3d3a;font-weight:500}
 .tl-p.done{color:#888}
-@media(prefers-color-scheme:dark){.tl-p{color:#666;border-right-color:rgba(255,255,255,0.08)}.tl-p:hover{background:rgba(255,255,255,0.05)}.tl-p.active{background:rgba(255,255,255,0.07);color:#c2c0b6}.tl-p.done{color:#888780}}
+@media(prefers-color-scheme:dark){.tl-p{color:#666;border-right-color:rgba(255,255,255,0.07)}.tl-p:hover{background:rgba(255,255,255,0.05)}.tl-p.active{background:rgba(255,255,255,0.07);color:#c2c0b6}.tl-p.done{color:#888780}}
 .bot{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .btn{font-size:13px;padding:5px 16px;border-radius:8px;cursor:pointer;border:0.5px solid rgba(0,0,0,0.2);background:#fff;color:#3d3d3a;font-family:inherit}
 .btn:disabled{opacity:.3;cursor:default}
@@ -57,7 +57,6 @@ canvas{display:block;width:100%}
 </style>
 </head>
 <body>
-
 <div class="desc" id="desc"></div>
 <div class="panels">
   <div class="panel">
@@ -66,7 +65,7 @@ canvas{display:block;width:100%}
     <canvas id="gC" height="280"></canvas>
   </div>
   <div class="panel">
-    <div class="plabel">Feature space<span class="epill" id="epill">editing t=0</span></div>
+    <div class="plabel">Feature space<span class="epill" id="epill">editing</span></div>
     <div class="phint" id="fHint"></div>
     <canvas id="fC" height="280"></canvas>
   </div>
@@ -92,34 +91,33 @@ const FG=dark?'#c2c0b6':'#3d3d3a';
 const FGM=dark?'#666':'#aaa';
 const GR=dark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)';
 const BD=dark?'rgba(255,255,255,0.12)':'rgba(0,0,0,0.1)';
-
 const NC=dark?'#7F77DD':'#534AB7';
 const NL=dark?'#3C3489':'#EEEDFE';
+const AC='#E24B4A';
+
 const NODES=[
   {id:0,lbl:'v0'},{id:1,lbl:'v1'},{id:2,lbl:'v2'},{id:3,lbl:'v3'},
   {id:4,lbl:'v4'},{id:5,lbl:'v5'},{id:6,lbl:'v6'},{id:7,lbl:'v7'},
 ];
 const D_GPOS=[[.18,.28],[.18,.72],[.82,.28],[.82,.72],[.18,.50],[.82,.50],[.50,.18],[.50,.82]];
 const D_FEAT=[[.15,.82],[.22,.71],[.78,.80],[.85,.68],[.12,.18],[.20,.25],[.30,.75],[.72,.60]];
-const TEVENTS=[
-  {edges:[],note:'kNN edges from initial feature positions'},
-  {edges:[[0,6],[1,6]],note:'v6 bridges v0 and v1'},
-  {edges:[[2,7],[3,7]],note:'v7 joins cluster'},
-  {edges:[[0,2],[4,6]],note:'new cross edges'},
-  {edges:[[1,4],[3,5]],note:'more cross edges'},
-  {edges:[[0,4],[2,5],[6,4]],note:'dense mixing'},
-];
+
 const PH=['Init','Messages','Aggregate','Update'];
-const FORM=['h\u1d65\u2070=x_v','m\u1d64\u1d65=M(h\u1d64,h\u1d65)','M\u1d65=AGG({m\u1d64\u1d65:u\u2208N(v)})','h\u1d65\u207a=ReLU(W\u00b7[h\u1d65\u2016M\u1d65])'];
+const FORM=[
+  'h_v\u2070 = x_v',
+  'm_{u\u2192v} = h_u',
+  'M_v = mean({ h_u : u\u2192v })',
+  'h_v\u207a = (1\u2212\u03b1)h_v + \u03b1M_v',
+];
 const DESC=[
-  t=>`t=${t}: ${TEVENTS[t].note}. `+(t===0?'Drag nodes in feature space or adjust kNN to change which edges form.':'Positions evolved from your t=0 layout.'),
-  t=>`t=${t}: every node sends messages to its neighbors simultaneously — particles travel both ways along each edge.`,
-  t=>`t=${t}: each node pools incoming messages into its local centroid M_v (dashed dots).`,
-  t=>`t=${t}: all nodes update — watch the entire cloud shift toward neighborhood centroids.`,
+  'Initial positions. u\u2192v means v is one of u\u2019s k nearest neighbours — so u sends to v, not the other way around. Drag nodes or change kNN.',
+  'Each node sends along its outgoing edges only. Particles travel in one direction. Nodes with no outgoing edges send nothing.',
+  'Each node collects its incoming messages and computes centroid M_v (red). Nodes with no incoming edges have no centroid.',
+  'Nodes with incoming edges blend toward M_v. Nodes with no incoming edges do not move.',
 ];
 
-const T_MAX=5;
-let curT=0,curP=0,curK=1,curKNN=2,trail=false,playing=false,ptimer=null;
+const PASS_MAX=4;
+let curPass=0,curP=0,curK=1,curKNN=2,trail=false,playing=false,ptimer=null;
 let ap=0,afr=null;
 let gpos=D_GPOS.map(p=>[...p]);
 let ifeat=D_FEAT.map(f=>[...f]);
@@ -127,44 +125,46 @@ let gdrag=-1,gdx=0,gdy=0;
 let fdrag=-1,fdx=0,fdy=0;
 
 function computeKNN(k){
-  const result=new Set();
+  const result=[];
   NODES.forEach(n=>{
-    const dists=NODES.filter(m=>m.id!==n.id).map(m=>({id:m.id,d:Math.hypot(ifeat[n.id][0]-ifeat[m.id][0],ifeat[n.id][1]-ifeat[m.id][1])}));
+    const dists=NODES.filter(m=>m.id!==n.id)
+      .map(m=>({id:m.id,d:Math.hypot(ifeat[n.id][0]-ifeat[m.id][0],ifeat[n.id][1]-ifeat[m.id][1])}));
     dists.sort((a,b)=>a.d-b.d);
-    dists.slice(0,k).forEach(m=>{const key=Math.min(n.id,m.id)+'-'+Math.max(n.id,m.id);result.add(key);});
+    dists.slice(0,k).forEach(m=>result.push([n.id,m.id]));
   });
-  return [...result].map(s=>s.split('-').map(Number));
+  return result;
 }
 
-function edges(t){
-  const s=new Set();
-  computeKNN(curKNN).forEach(e=>s.add(e[0]+'-'+e[1]));
-  for(let i=1;i<=t;i++)TEVENTS[i].edges.forEach(e=>s.add(Math.min(e[0],e[1])+'-'+Math.max(e[0],e[1])));
-  return[...s].map(x=>x.split('-').map(Number));
-}
-function nbrs(n,t){return edges(t).filter(e=>e[0]===n||e[1]===n).map(e=>e[0]===n?e[1]:e[0]);}
-function feats(t,k){
-  const es=edges(t);let h=ifeat.map(f=>[...f]);
-  const a0=0.72*(1+t*0.08);
-  for(let l=0;l<k;l++){
-    const nH=h.map(f=>[...f]);
-    NODES.forEach(n=>{
-      const nb=es.filter(e=>e[0]===n.id||e[1]===n.id).map(e=>e[0]===n.id?e[1]:e[0]);
-      if(!nb.length)return;
-      const ag=[0,0];nb.forEach(ni=>{ag[0]+=h[ni][0];ag[1]+=h[ni][1];});ag[0]/=nb.length;ag[1]/=nb.length;
-      const a=Math.min(0.92,a0*(1+l*.2));
-      nH[n.id][0]=Math.max(.02,Math.min(.98,h[n.id][0]*(1-a)+ag[0]*a));
-      nH[n.id][1]=Math.max(.02,Math.min(.98,h[n.id][1]*(1-a)+ag[1]*a));
-    });h=nH;
+function getEdges(){return computeKNN(curKNN);}
+function incomingOf(nid){return getEdges().filter(([s,d])=>d===nid).map(([s])=>s);}
+
+function featsAfterPass(pass,k){
+  let h=ifeat.map(f=>[...f]);
+  for(let p=0;p<pass;p++){
+    for(let l=0;l<k;l++){
+      const nH=h.map(f=>[...f]);
+      NODES.forEach(n=>{
+        const inc=incomingOf(n.id);
+        if(!inc.length)return;
+        const ag=[0,0];
+        inc.forEach(ni=>{ag[0]+=h[ni][0];ag[1]+=h[ni][1];});
+        ag[0]/=inc.length;ag[1]/=inc.length;
+        const a=Math.min(0.92,0.72*(1+l*.2));
+        nH[n.id][0]=Math.max(.02,Math.min(.98,h[n.id][0]*(1-a)+ag[0]*a));
+        nH[n.id][1]=Math.max(.02,Math.min(.98,h[n.id][1]*(1-a)+ag[1]*a));
+      });
+      h=nH;
+    }
   }
   return h;
 }
+
 function sc(v,sz,p){return p+v*(sz-2*p);}
 function inv(px,sz,p){return Math.max(.02,Math.min(.98,(px-p)/(sz-2*p)));}
 function cxy(cv,e){const r=cv.getBoundingClientRect(),cx=e.touches?e.touches[0].clientX:e.clientX,cy=e.touches?e.touches[0].clientY:e.clientY;return[cx-r.left,cy-r.top];}
 function hitG(x,y,W,H){for(let i=NODES.length-1;i>=0;i--){const nx=sc(gpos[i][0],W,28),ny=sc(gpos[i][1],H,28);if(Math.hypot(x-nx,y-ny)<=13)return i;}return -1;}
-function hitF(x,y,W,H,f){for(let i=NODES.length-1;i>=0;i--){const nx=sc(f[i][0],W,30),ny=H-sc(f[i][1],H,30);if(Math.hypot(x-nx,y-ny)<=13)return i;}return -1;}
-function isInit(){return curT===0&&curP===0;}
+function hitF(x,y,W,H){for(let i=NODES.length-1;i>=0;i--){const nx=sc(ifeat[i][0],W,30),ny=H-sc(ifeat[i][1],H,30);if(Math.hypot(x-nx,y-ny)<=13)return i;}return -1;}
+function isInit(){return curPass===0&&curP===0;}
 
 function initDrags(){
   const gc=document.getElementById('gC'),fc=document.getElementById('fC');
@@ -174,58 +174,77 @@ function initDrags(){
   gc.addEventListener('mousedown',gdn);window.addEventListener('mousemove',gmv);window.addEventListener('mouseup',gup);
   gc.addEventListener('touchstart',gdn,{passive:false});window.addEventListener('touchmove',gmv,{passive:false});window.addEventListener('touchend',gup);
 
-  function fdn(e){if(!isInit())return;const[x,y]=cxy(fc,e);const W=fc.offsetWidth,H=fc.offsetHeight||280;const cur=ifeat;const h=hitF(x,y,W,H,cur);if(h<0)return;fdrag=h;fdx=x-sc(cur[h][0],W,30);fdy=y-(H-sc(cur[h][1],H,30));fc.classList.add('fdragging');e.preventDefault();}
+  function fdn(e){if(!isInit())return;const[x,y]=cxy(fc,e);const W=fc.offsetWidth,H=fc.offsetHeight||280;const h=hitF(x,y,W,H);if(h<0)return;fdrag=h;fdx=x-sc(ifeat[h][0],W,30);fdy=y-(H-sc(ifeat[h][1],H,30));fc.classList.add('fdragging');e.preventDefault();}
   function fmv(e){if(fdrag<0)return;const[x,y]=cxy(fc,e);const W=fc.offsetWidth,H=fc.offsetHeight||280;ifeat[fdrag][0]=inv(x-fdx,W,30);ifeat[fdrag][1]=inv(H-(y-fdy),H,30);draw();e.preventDefault();}
-  function fup(){fdrag=-1;fc.classList.remove('fdragging');}
+  function fup(){fdrag=-1;document.getElementById('fC').classList.remove('fdragging');}
   fc.addEventListener('mousedown',fdn);window.addEventListener('mousemove',fmv);window.addEventListener('mouseup',fup);
   fc.addEventListener('touchstart',fdn,{passive:false});window.addEventListener('touchmove',fmv,{passive:false});window.addEventListener('touchend',fup);
 }
 
+function arrow(ctx,x0,y0,x1,y1,R,col,alpha,lw){
+  const dx=x1-x0,dy=y1-y0,len=Math.sqrt(dx*dx+dy*dy);
+  if(len<2*R+8)return;
+  const ux=dx/len,uy=dy/len;
+  const sx=x0+ux*R,sy=y0+uy*R,ex=x1-ux*(R+7),ey=y1-uy*(R+7);
+  ctx.globalAlpha=alpha;ctx.strokeStyle=col;ctx.lineWidth=lw;
+  ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(ex,ey);ctx.stroke();
+  const hw=3.5,hl=7,px=-uy,py=ux;
+  ctx.fillStyle=col;
+  ctx.beginPath();ctx.moveTo(ex+ux*hl,ey+uy*hl);ctx.lineTo(ex+px*hw,ey+py*hw);ctx.lineTo(ex-px*hw,ey-py*hw);ctx.closePath();ctx.fill();
+  ctx.globalAlpha=1;
+}
+
 function drawGraph(){
   const cv=document.getElementById('gC');
-  const W=cv.offsetWidth||300,H=280,pad=28;
+  const W=cv.offsetWidth||300,H=280,pad=28,R=8;
   cv.width=W*devicePixelRatio;cv.height=H*devicePixelRatio;
   const ctx=cv.getContext('2d');ctx.scale(devicePixelRatio,devicePixelRatio);
   ctx.clearRect(0,0,W,H);
-  const es=edges(curT);const knnSet=new Set(computeKNN(curKNN).map(e=>e[0]+'-'+e[1]));
-  const newTempEdges=new Set(curT>0?TEVENTS[curT].edges.map(e=>Math.min(e[0],e[1])+'-'+Math.max(e[0],e[1])):[]);
-  es.forEach(([u,v])=>{
-    const key=Math.min(u,v)+'-'+Math.max(u,v);
-    const isKnn=knnSet.has(key);const isNew=newTempEdges.has(key)&&!isKnn;
-    const x0=sc(gpos[u][0],W,pad),y0=sc(gpos[u][1],H,pad),x1=sc(gpos[v][0],W,pad),y1=sc(gpos[v][1],H,pad);
-    ctx.lineWidth=isNew?1.5:isKnn?1:.75;
-    ctx.strokeStyle=isNew?'#378ADD':isKnn?(dark?'rgba(255,255,255,0.35)':'rgba(0,0,0,0.25)'):BD;
-    ctx.globalAlpha=isNew?.85:isKnn?.6:.4;ctx.setLineDash(isKnn&&!isNew?[3,3]:[]);
-    ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();ctx.setLineDash([]);ctx.globalAlpha=1;
+  const es=getEdges();
+
+  es.forEach(([s,d])=>{
+    const x0=sc(gpos[s][0],W,pad),y0=sc(gpos[s][1],H,pad);
+    const x1=sc(gpos[d][0],W,pad),y1=sc(gpos[d][1],H,pad);
+    arrow(ctx,x0,y0,x1,y1,R,BD,.55,.75);
     if(curP===1&&ap>0){
       const a=Math.min(1,ap);
-      ctx.fillStyle=NC;ctx.globalAlpha=.8;
-      ctx.beginPath();ctx.arc(x0+(x1-x0)*a,y0+(y1-y0)*a,3.5,0,Math.PI*2);ctx.fill();
-      ctx.beginPath();ctx.arc(x1+(x0-x1)*a,y1+(y0-y1)*a,3.5,0,Math.PI*2);ctx.fill();
-      ctx.globalAlpha=1;
+      const dx=x1-x0,dy=y1-y0,len=Math.sqrt(dx*dx+dy*dy);
+      if(len>2*R+8){
+        const ux=dx/len,uy=dy/len;
+        const sx=x0+ux*R,sy=y0+uy*R,ex=x1-ux*(R+7),ey=y1-uy*(R+7);
+        ctx.beginPath();ctx.arc(sx+(ex-sx)*a,sy+(ey-sy)*a,3.5,0,Math.PI*2);
+        ctx.fillStyle=NC;ctx.globalAlpha=.9;ctx.fill();ctx.globalAlpha=1;
+      }
     }
   });
+
   NODES.forEach(n=>{
     const x=sc(gpos[n.id][0],W,pad),y=sc(gpos[n.id][1],H,pad);
-    const hasNbr=nbrs(n.id,curT).length>0;
-    const isActive=(curP===1||curP===2||curP===3)&&hasNbr;
-    const iD=gdrag===n.id,r=8;
-    if(isActive||iD){ctx.beginPath();ctx.arc(x,y,r+5,0,Math.PI*2);ctx.fillStyle=NL;ctx.globalAlpha=iD?.55:.3;ctx.fill();ctx.globalAlpha=1;}
-    ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=(isActive||iD)?NC:NL;ctx.fill();
+    const hasInc=incomingOf(n.id).length>0;
+    const iD=gdrag===n.id;
+    const hl=(curP===1||curP===2||curP===3)&&hasInc;
+    if(hl||iD){ctx.beginPath();ctx.arc(x,y,R+5,0,Math.PI*2);ctx.fillStyle=NL;ctx.globalAlpha=iD?.55:.25;ctx.fill();ctx.globalAlpha=1;}
+    ctx.beginPath();ctx.arc(x,y,R,0,Math.PI*2);ctx.fillStyle=(hl||iD)?NC:NL;ctx.fill();
     ctx.strokeStyle=BG;ctx.lineWidth=iD?2:1.5;ctx.stroke();
-    if(curP===2&&hasNbr){ctx.beginPath();ctx.arc(x,y,r+7,0,Math.PI*2);ctx.strokeStyle=NC;ctx.lineWidth=1.5;ctx.setLineDash([3,3]);ctx.globalAlpha=.5+ap*.3;ctx.stroke();ctx.globalAlpha=1;ctx.setLineDash([]);}
-    ctx.font='10px sans-serif';ctx.fillStyle=(isActive||iD)?'#fff':NC;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(n.lbl,x,y);
+    if(curP===2&&hasInc){
+      ctx.beginPath();ctx.arc(x,y,R+6,0,Math.PI*2);
+      ctx.strokeStyle=AC;ctx.lineWidth=1.5;ctx.setLineDash([3,3]);
+      ctx.globalAlpha=.4+ap*.35;ctx.stroke();ctx.globalAlpha=1;ctx.setLineDash([]);
+    }
+    ctx.font='10px sans-serif';ctx.fillStyle=(hl||iD)?'#fff':NC;
+    ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(n.lbl,x,y);
   });
 }
 
 function drawFeature(){
   const cv=document.getElementById('fC');
-  const W=cv.offsetWidth||300,H=280,pad=30;
+  const W=cv.offsetWidth||300,H=280,pad=30,R=6;
   cv.width=W*devicePixelRatio;cv.height=H*devicePixelRatio;
   const ctx=cv.getContext('2d');ctx.scale(devicePixelRatio,devicePixelRatio);
   ctx.clearRect(0,0,W,H);
   const editable=isInit();
   cv.className=editable?'editable':fdrag>=0?'fdragging':'';
+
   if(editable){ctx.fillStyle=dark?'rgba(255,255,255,0.02)':'rgba(0,0,0,0.015)';ctx.fillRect(pad,pad,W-2*pad,H-2*pad);}
   ctx.strokeStyle=GR;ctx.lineWidth=.5;
   [.25,.5,.75].forEach(v=>{const x=sc(v,W,pad),y=sc(v,H,pad);ctx.beginPath();ctx.moveTo(x,pad);ctx.lineTo(x,H-pad);ctx.stroke();ctx.beginPath();ctx.moveTo(pad,y);ctx.lineTo(W-pad,y);ctx.stroke();});
@@ -235,96 +254,128 @@ function drawFeature(){
   ['0','0.5','1'].forEach((l,i)=>ctx.fillText(l,sc(i*.5,W,pad),H-pad+11));
   ctx.textAlign='right';['0','0.5','1'].forEach((l,i)=>ctx.fillText(l,pad-3,H-sc(i*.5,H,pad)+3));
 
-  const preFeat=curT===0?ifeat:feats(curT-1,curK);
-  const postFeat=feats(curT,curK);
-  const f=editable?ifeat:(curP<3?preFeat:postFeat);
-  const pf=preFeat;
-  const allEdges=editable?[]:edges(curT);
+  const pre=featsAfterPass(curPass,curK);
+  const post=featsAfterPass(curPass+1,curK);
 
   if(editable){
-    const knnEdges=computeKNN(curKNN);
-    knnEdges.forEach(([u,v])=>{
-      const x0=sc(ifeat[u][0],W,pad),y0=H-sc(ifeat[u][1],H,pad);
-      const x1=sc(ifeat[v][0],W,pad),y1=H-sc(ifeat[v][1],H,pad);
-      ctx.strokeStyle=dark?'rgba(255,255,255,0.25)':'rgba(0,0,0,0.18)';ctx.lineWidth=1;ctx.setLineDash([3,3]);
-      ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();ctx.setLineDash([]);
+    getEdges().forEach(([s,d])=>{
+      const x0=sc(ifeat[s][0],W,pad),y0=H-sc(ifeat[s][1],H,pad);
+      const x1=sc(ifeat[d][0],W,pad),y1=H-sc(ifeat[d][1],H,pad);
+      arrow(ctx,x0,y0,x1,y1,R,dark?'rgba(255,255,255,0.35)':'rgba(0,0,0,0.22)',.7,.75);
     });
   }
-  if(trail&&!editable){
-    for(let pt=1;pt<=curT;pt++){
-      const a=feats(pt-1,curK),b=feats(pt,curK);
-      NODES.forEach(n=>{const x0=sc(a[n.id][0],W,pad),y0=H-sc(a[n.id][1],H,pad),x1=sc(b[n.id][0],W,pad),y1=H-sc(b[n.id][1],H,pad);ctx.strokeStyle=NC;ctx.globalAlpha=.15;ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();ctx.globalAlpha=1;});
+
+  if(trail){
+    for(let p=1;p<=curPass;p++){
+      const a=featsAfterPass(p-1,curK),b=featsAfterPass(p,curK);
+      NODES.forEach(n=>{
+        const x0=sc(a[n.id][0],W,pad),y0=H-sc(a[n.id][1],H,pad);
+        const x1=sc(b[n.id][0],W,pad),y1=H-sc(b[n.id][1],H,pad);
+        ctx.strokeStyle=NC;ctx.globalAlpha=.15;ctx.lineWidth=1;
+        ctx.beginPath();ctx.moveTo(x0,y0);ctx.lineTo(x1,y1);ctx.stroke();ctx.globalAlpha=1;
+      });
     }
   }
+
   if(curP===1&&!editable){
-    allEdges.forEach(([u,v])=>{
-      const ux=sc(pf[u][0],W,pad),uy=H-sc(pf[u][1],H,pad);
-      const vx=sc(pf[v][0],W,pad),vy=H-sc(pf[v][1],H,pad);
+    getEdges().forEach(([s,d])=>{
+      const sx=sc(pre[s][0],W,pad),sy=H-sc(pre[s][1],H,pad);
+      const dx=sc(pre[d][0],W,pad),dy=H-sc(pre[d][1],H,pad);
       const a=Math.min(1,ap);
-      ctx.strokeStyle=NC;ctx.lineWidth=.75;ctx.globalAlpha=.2;
-      ctx.beginPath();ctx.moveTo(ux,uy);ctx.lineTo(vx,vy);ctx.stroke();
-      ctx.globalAlpha=.75;ctx.fillStyle=NC;
-      ctx.beginPath();ctx.arc(ux+(vx-ux)*a,uy+(vy-uy)*a,3,0,Math.PI*2);ctx.fill();
-      ctx.beginPath();ctx.arc(vx+(ux-vx)*a,vy+(uy-vy)*a,3,0,Math.PI*2);ctx.fill();
-      ctx.globalAlpha=1;
+      ctx.strokeStyle=NC;ctx.lineWidth=.75;ctx.globalAlpha=.18;
+      ctx.beginPath();ctx.moveTo(sx,sy);ctx.lineTo(dx,dy);ctx.stroke();ctx.globalAlpha=1;
+      ctx.beginPath();ctx.arc(sx+(dx-sx)*a,sy+(dy-sy)*a,3,0,Math.PI*2);
+      ctx.fillStyle=NC;ctx.globalAlpha=.8;ctx.fill();ctx.globalAlpha=1;
     });
   }
+
   if(curP===2&&!editable){
     NODES.forEach(n=>{
-      const nb=nbrs(n.id,curT);if(!nb.length)return;
-      const ag=[0,0];nb.forEach(ni=>{ag[0]+=pf[ni][0];ag[1]+=pf[ni][1];});ag[0]/=nb.length;ag[1]/=nb.length;
+      const inc=incomingOf(n.id);if(!inc.length)return;
+      const ag=[0,0];inc.forEach(ni=>{ag[0]+=pre[ni][0];ag[1]+=pre[ni][1];});
+      ag[0]/=inc.length;ag[1]/=inc.length;
       const cx=sc(ag[0],W,pad),cy=H-sc(ag[1],H,pad);
-      const nx=sc(pf[n.id][0],W,pad),ny=H-sc(pf[n.id][1],H,pad);
-      ctx.strokeStyle=NC;ctx.lineWidth=1;ctx.setLineDash([2,3]);ctx.globalAlpha=.35;
+      const nx=sc(pre[n.id][0],W,pad),ny=H-sc(pre[n.id][1],H,pad);
+      ctx.strokeStyle=AC;ctx.lineWidth=1;ctx.setLineDash([2,3]);ctx.globalAlpha=.4;
       ctx.beginPath();ctx.moveTo(nx,ny);ctx.lineTo(cx,cy);ctx.stroke();
       ctx.setLineDash([]);ctx.globalAlpha=1;
-      ctx.beginPath();ctx.arc(cx,cy,4,0,Math.PI*2);ctx.fillStyle=NC;ctx.globalAlpha=.45;ctx.fill();ctx.globalAlpha=1;
+      ctx.beginPath();ctx.arc(cx,cy,4,0,Math.PI*2);
+      ctx.fillStyle=AC;ctx.globalAlpha=.7;ctx.fill();ctx.globalAlpha=1;
     });
   }
+
   NODES.forEach(n=>{
     const iD=fdrag===n.id;
-    const hasNbr=!editable&&nbrs(n.id,curT).length>0;
-    const isActive=(curP===1||curP===2||curP===3)&&hasNbr&&!editable;
-    let fx=f[n.id][0],fy=f[n.id][1];
-    if(curP===3&&!editable){
-      fx=preFeat[n.id][0]+(postFeat[n.id][0]-preFeat[n.id][0])*Math.min(1,ap);
-      fy=preFeat[n.id][1]+(postFeat[n.id][1]-preFeat[n.id][1])*Math.min(1,ap);
-    }
-    const x=sc(fx,W,pad),y=H-sc(fy,H,pad),r=6;
-    if(editable||isActive){ctx.beginPath();ctx.arc(x,y,r+4,0,Math.PI*2);ctx.fillStyle=NL;ctx.globalAlpha=iD?.6:.22;ctx.fill();ctx.globalAlpha=1;}
-    ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=(isActive||iD||editable)?NC:NL;ctx.fill();
+    const hasInc=!editable&&incomingOf(n.id).length>0;
+    const isActive=(curP===1||curP===2||curP===3)&&hasInc;
+    let fx,fy;
+    if(editable){fx=ifeat[n.id][0];fy=ifeat[n.id][1];}
+    else if(curP===3){
+      const a=Math.min(1,ap);
+      fx=pre[n.id][0]+(post[n.id][0]-pre[n.id][0])*a;
+      fy=pre[n.id][1]+(post[n.id][1]-pre[n.id][1])*a;
+    } else {fx=pre[n.id][0];fy=pre[n.id][1];}
+    const x=sc(fx,W,pad),y=H-sc(fy,H,pad);
+    if(editable||isActive){ctx.beginPath();ctx.arc(x,y,R+4,0,Math.PI*2);ctx.fillStyle=NL;ctx.globalAlpha=iD?.6:.2;ctx.fill();ctx.globalAlpha=1;}
+    ctx.beginPath();ctx.arc(x,y,R,0,Math.PI*2);ctx.fillStyle=(isActive||iD||editable)?NC:NL;ctx.fill();
     ctx.strokeStyle=BG;ctx.lineWidth=iD?2:1.5;ctx.stroke();
-    if(iD&&editable){ctx.beginPath();ctx.arc(x,y,r+2,0,Math.PI*2);ctx.strokeStyle=NC;ctx.lineWidth=1.5;ctx.stroke();}
-    ctx.font='10px sans-serif';
-    ctx.fillStyle=(editable||isActive)?'#fff':NC;
+    if(iD&&editable){ctx.beginPath();ctx.arc(x,y,R+2,0,Math.PI*2);ctx.strokeStyle=NC;ctx.lineWidth=1.5;ctx.stroke();}
+    ctx.font='10px sans-serif';ctx.fillStyle=(editable||isActive)?'#fff':NC;
     ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(n.lbl,x,y);
-    if(editable){ctx.font='8px sans-serif';ctx.fillStyle=FGM;ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.fillText(`${fx.toFixed(2)},${fy.toFixed(2)}`,x,y-r-4);}
-    else{ctx.font='9px sans-serif';ctx.fillStyle=FG;ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.fillText(n.lbl,x,y-r-3);}
+    if(editable){ctx.font='8px sans-serif';ctx.fillStyle=FGM;ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.fillText(`${fx.toFixed(2)},${fy.toFixed(2)}`,x,y-R-4);}
+    else{ctx.font='9px sans-serif';ctx.fillStyle=FG;ctx.textAlign='center';ctx.textBaseline='alphabetic';ctx.fillText(n.lbl,x,y-R-3);}
   });
+}
+
+function phasesForPass(pass){return pass===0?4:3;}
+function phaseOffset(pass){return pass===0?0:1;}
+function totalSteps(){
+  let s=0;for(let p=0;p<=PASS_MAX;p++)s+=phasesForPass(p);return s;
+}
+function stepIdx(){
+  let s=0;
+  for(let p=0;p<curPass;p++)s+=phasesForPass(p);
+  s+=curP-phaseOffset(curPass);
+  return s;
+}
+function stepToPassPhase(s){
+  let rem=s;
+  for(let pass=0;pass<=PASS_MAX;pass++){
+    const n=phasesForPass(pass);
+    if(rem<n)return{pass,p:rem+phaseOffset(pass)};
+    rem-=n;
+  }
+  return{pass:PASS_MAX,p:3};
 }
 
 function buildTL(){
   const tl=document.getElementById('tl');tl.innerHTML='';
-  for(let t=0;t<=T_MAX;t++){
+  for(let pass=0;pass<=PASS_MAX;pass++){
     const col=document.createElement('div');col.className='tl-t';
-    col.innerHTML=`<div class="tl-h">t=${t}</div><div class="tl-ps" id="tlp${t}"></div>`;
+    col.innerHTML=`<div class="tl-h">pass ${pass}</div><div class="tl-ps"></div>`;
     tl.appendChild(col);
     const row=col.querySelector('.tl-ps');
-    PH.forEach((name,p)=>{
-      const cell=document.createElement('div');const gs=t*4+p,cs=stepIdx();
-      cell.className='tl-p'+(t===curT&&p===curP?' active':gs<cs?' done':'');
-      cell.textContent=name;cell.title=`t=${t}, ${name}`;cell.onclick=()=>{curT=t;curP=p;startAnim();};
+    const startP=phaseOffset(pass);
+    for(let p=startP;p<4;p++){
+      const cell=document.createElement('div');
+      const gs=stepToPassPhase_inv(pass,p),cs=stepIdx();
+      cell.className='tl-p'+(pass===curPass&&p===curP?' active':gs<cs?' done':'');
+      cell.textContent=PH[p];cell.title=`Pass ${pass}, ${PH[p]}`;
+      cell.onclick=((_pass,_p)=>()=>{curPass=_pass;curP=_p;startAnim();})(pass,p);
       row.appendChild(cell);
-    });
+    }
   }
 }
-
-function stepIdx(){return curT*4+curP;}
-function totalSteps(){return(T_MAX+1)*4;}
+function stepToPassPhase_inv(pass,p){
+  let s=0;
+  for(let pp=0;pp<pass;pp++)s+=phasesForPass(pp);
+  s+=p-phaseOffset(pass);
+  return s;
+}
 
 function startAnim(){
   cancelAnimationFrame(afr);ap=0;
-  const dur=curP===0?0:700,start=performance.now();
+  const dur=(curPass===0&&curP===0)?0:700,start=performance.now();
   function step(now){ap=Math.min(1,(now-start)/dur);draw();if(ap<1)afr=requestAnimationFrame(step);}
   afr=requestAnimationFrame(step);buildTL();updateUI();
 }
@@ -333,37 +384,51 @@ function draw(){drawGraph();drawFeature();}
 function updateUI(){
   const ed=isInit();
   document.getElementById('epill').style.display=ed?'':'none';
-  document.getElementById('fHint').textContent=ed?'Drag nodes to reposition embeddings. Edges update live via kNN.':'';
-  document.getElementById('gHint').textContent='';
+  document.getElementById('fHint').textContent=ed?'Drag nodes to set initial positions — directed kNN edges update live':'';
   document.getElementById('knnv').textContent=curKNN;
-  document.getElementById('desc').innerHTML=`<span class="mono">${FORM[curP]}</span>&nbsp;&nbsp;<span style="color:${FGM}">${DESC[curP](curT)}</span>`;
-  const cur=stepIdx(),total=totalSteps()-1;
-  document.getElementById('sind').textContent=`Step ${cur+1} of ${total+1}`;
-  document.getElementById('prevBtn').disabled=cur===0;document.getElementById('nextBtn').disabled=cur===total;
+  document.getElementById('desc').innerHTML=`<span class="mono">${FORM[curP]}</span> &nbsp;<span style="color:${FGM}">${DESC[curP]}</span>`;
+  const phaseLabel=curPass===0?`Pass 0, phase ${curP+1}/4`:`Pass ${curPass}, ${PH[curP]}`;
+  document.getElementById('sind').textContent=phaseLabel;
+  document.getElementById('prevBtn').disabled=stepIdx()===0;
+  document.getElementById('nextBtn').disabled=stepIdx()===totalSteps()-1;
   document.getElementById('kv').textContent=curK;
   document.getElementById('trailBtn').className='tgl'+(trail?' on':'');
-  document.getElementById('playBtn').textContent=playing?'Pause':'Play';document.getElementById('playBtn').className='tgl'+(playing?' on':'');
-  document.getElementById('legend').innerHTML=`<div class="li"><div class="ld" style="background:${NC}"></div>node</div><div class="li"><div class="ld" style="background:#378ADD;border-radius:2px"></div>new temporal edges</div><div class="li"><div class="ld" style="background:${dark?'rgba(255,255,255,0.3)':'rgba(0,0,0,0.25)'};border-radius:2px"></div>kNN edges (t=0)</div>`;
-  const f0=ifeat,ft=feats(curT,curK);
-  const disps=NODES.map(n=>Math.hypot(ft[n.id][0]-f0[n.id][0],ft[n.id][1]-f0[n.id][1]));
-  const avgDisp=disps.reduce((a,b)=>a+b,0)/disps.length;
-  const maxDisp=Math.max(...disps);
+  document.getElementById('playBtn').textContent=playing?'Pause':'Play';
+  document.getElementById('playBtn').className='tgl'+(playing?' on':'');
+  document.getElementById('legend').innerHTML=`
+    <div class="li"><div class="ld" style="background:${NC}"></div>has incoming edges</div>
+    <div class="li"><div class="ld" style="background:${NL};border:1px solid ${NC}"></div>no incoming edges</div>
+    <div class="li"><div class="ld" style="background:${AC}"></div>M_v centroid</div>`;
+  const pre=featsAfterPass(curPass,curK),post=featsAfterPass(curPass+1,curK);
+  const disps=NODES.map(n=>Math.hypot(post[n.id][0]-pre[n.id][0],post[n.id][1]-pre[n.id][1]));
+  const avg=disps.reduce((a,b)=>a+b,0)/disps.length;
+  const max=Math.max(...disps);
+  const inDegs=NODES.map(n=>incomingOf(n.id).length);
   document.getElementById('stats').innerHTML=`
-    <div class="stat"><div class="sv">${computeKNN(curKNN).length}</div><div class="sl">kNN edges (t=0)</div></div>
-    <div class="stat"><div class="sv">${edges(curT).length}</div><div class="sl">total edges t=${curT}</div></div>
-    <div class="stat"><div class="sv">${avgDisp.toFixed(3)}</div><div class="sl">avg displacement</div></div>
-    <div class="stat"><div class="sv">${maxDisp.toFixed(3)}</div><div class="sl">max displacement</div></div>`;
+    <div class="stat"><div class="sv">${getEdges().length}</div><div class="sl">directed edges</div></div>
+    <div class="stat"><div class="sv">${Math.max(...inDegs)}</div><div class="sl">max in-degree</div></div>
+    <div class="stat"><div class="sv">${avg.toFixed(3)}</div><div class="sl">avg shift (pass ${curPass}\u2192${curPass+1})</div></div>
+    <div class="stat"><div class="sv">${max.toFixed(3)}</div><div class="sl">max shift</div></div>`;
 }
 
-function navigate(d){let s=Math.max(0,Math.min(totalSteps()-1,stepIdx()+d));curT=Math.floor(s/4);curP=s%4;startAnim();}
+function navigate(d){
+  const s=Math.max(0,Math.min(totalSteps()-1,stepIdx()+d));
+  const {pass,p}=stepToPassPhase(s);curPass=pass;curP=p;startAnim();
+}
 function onLayer(v){curK=v;startAnim();}
 function onKnn(v){curKNN=v;startAnim();}
 function toggleTrail(){trail=!trail;draw();buildTL();}
-function resetAll(){gpos=D_GPOS.map(p=>[...p]);ifeat=D_FEAT.map(f=>[...f]);curT=0;curP=0;startAnim();}
+function resetAll(){gpos=D_GPOS.map(p=>[...p]);ifeat=D_FEAT.map(f=>[...f]);curPass=0;curP=0;startAnim();}
 function togglePlay(){
   playing=!playing;updateUI();
-  if(playing){if(stepIdx()>=totalSteps()-1){curT=0;curP=0;}ptimer=setInterval(()=>{const s=stepIdx()+1;if(s>=totalSteps()){playing=false;clearInterval(ptimer);updateUI();return;}curT=Math.floor(s/4);curP=s%4;startAnim();},900);}
-  else clearInterval(ptimer);
+  if(playing){
+    if(stepIdx()>=totalSteps()-1){curPass=0;curP=0;}
+    ptimer=setInterval(()=>{
+      const s=stepIdx()+1;
+      if(s>=totalSteps()){playing=false;clearInterval(ptimer);updateUI();return;}
+      const {pass,p}=stepToPassPhase(s);curPass=pass;curP=p;startAnim();
+    },900);
+  } else clearInterval(ptimer);
 }
 window.addEventListener('resize',()=>{draw();});
 initDrags();startAnim();
