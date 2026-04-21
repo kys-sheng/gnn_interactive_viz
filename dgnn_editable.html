@@ -5,66 +5,72 @@
 <title>GNN forward pass — directed kNN</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:system-ui,sans-serif;background:#fff;color:#3d3d3a;padding:1rem}
-@media(prefers-color-scheme:dark){body{background:#1a1a18;color:#c2c0b6}}
+body{font-family:system-ui,sans-serif;background:#fff;color:#3d3d3a;padding:1rem;transition:background .2s,color .2s}
+body.dark{background:#1a1a18;color:#c2c0b6}
 .panels{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-bottom:.75rem}
 .panel{border:0.5px solid rgba(0,0,0,0.12);border-radius:8px;overflow:hidden}
-@media(prefers-color-scheme:dark){.panel{border-color:rgba(255,255,255,0.12)}}
+body.dark .panel{border-color:rgba(255,255,255,0.12)}
 .plabel{font-size:11px;font-weight:500;color:#888;letter-spacing:.06em;text-transform:uppercase;padding:7px 12px 0}
 .phint{font-size:10px;color:#aaa;padding:1px 12px 5px;min-height:16px}
 canvas{display:block;width:100%}
 #gC{cursor:grab}#gC.dragging{cursor:grabbing}
 #fC.editable{cursor:crosshair}#fC.fdragging{cursor:grabbing}
 .desc{font-size:12px;color:#888;line-height:1.6;margin-bottom:.75rem;padding:8px 12px;border-radius:8px;background:rgba(0,0,0,0.04);min-height:38px}
-@media(prefers-color-scheme:dark){.desc{background:rgba(255,255,255,0.05);color:#888780}}
+body.dark .desc{background:rgba(255,255,255,0.05);color:#888780}
 .mono{font-family:monospace;font-size:12px;color:#3d3d3a}
-@media(prefers-color-scheme:dark){.mono{color:#c2c0b6}}
+body.dark .mono{color:#c2c0b6}
 .stats{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:.85rem}
 .stat{background:rgba(0,0,0,0.04);border-radius:8px;padding:7px 13px;flex:1;min-width:90px}
-@media(prefers-color-scheme:dark){.stat{background:rgba(255,255,255,0.05)}}
+body.dark .stat{background:rgba(255,255,255,0.05)}
 .sv{font-size:16px;font-weight:500}
 .sl{font-size:11px;color:#aaa;margin-top:1px}
 .legend{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:.75rem}
 .li{display:flex;align-items:center;gap:5px;font-size:11px;color:#888}
 .ld{width:9px;height:9px;border-radius:50%;flex-shrink:0}
 .tl{display:flex;align-items:stretch;border:0.5px solid rgba(0,0,0,0.12);border-radius:8px;overflow:hidden;margin-bottom:.85rem}
-@media(prefers-color-scheme:dark){.tl{border-color:rgba(255,255,255,0.12)}}
+body.dark .tl{border-color:rgba(255,255,255,0.12)}
 .tl-t{display:flex;flex-direction:column;flex:1;min-width:0;border-right:0.5px solid rgba(0,0,0,0.15)}
 .tl-t:last-child{border-right:none}
-@media(prefers-color-scheme:dark){.tl-t{border-right-color:rgba(255,255,255,0.12)}}
+body.dark .tl-t{border-right-color:rgba(255,255,255,0.12)}
 .tl-h{font-size:10px;font-weight:500;color:#aaa;padding:4px 0 3px;text-align:center;border-bottom:0.5px solid rgba(0,0,0,0.1);background:rgba(0,0,0,0.03)}
-@media(prefers-color-scheme:dark){.tl-h{background:rgba(255,255,255,0.04);border-bottom-color:rgba(255,255,255,0.08)}}
+body.dark .tl-h{background:rgba(255,255,255,0.04);border-bottom-color:rgba(255,255,255,0.08)}
 .tl-ps{display:flex}
 .tl-p{flex:1;font-size:9px;text-align:center;padding:5px 2px;cursor:pointer;color:#aaa;border-right:0.5px solid rgba(0,0,0,0.08);transition:background .12s;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .tl-p:last-child{border-right:none}
 .tl-p:hover{background:rgba(0,0,0,0.05)}
 .tl-p.active{background:rgba(0,0,0,0.07);color:#3d3d3a;font-weight:500}
 .tl-p.done{color:#888}
-@media(prefers-color-scheme:dark){.tl-p{color:#666;border-right-color:rgba(255,255,255,0.07)}.tl-p:hover{background:rgba(255,255,255,0.05)}.tl-p.active{background:rgba(255,255,255,0.07);color:#c2c0b6}.tl-p.done{color:#888780}}
+body.dark .tl-p{color:#666;border-right-color:rgba(255,255,255,0.07)}
+body.dark .tl-p:hover{background:rgba(255,255,255,0.05)}
+body.dark .tl-p.active{background:rgba(255,255,255,0.07);color:#c2c0b6}
+body.dark .tl-p.done{color:#888780}
 .bot{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .btn{font-size:13px;padding:5px 16px;border-radius:8px;cursor:pointer;border:0.5px solid rgba(0,0,0,0.2);background:#fff;color:#3d3d3a;font-family:inherit}
 .btn:disabled{opacity:.3;cursor:default}
-@media(prefers-color-scheme:dark){.btn{background:#1a1a18;color:#c2c0b6;border-color:rgba(255,255,255,0.2)}}
+body.dark .btn{background:#1a1a18;color:#c2c0b6;border-color:rgba(255,255,255,0.2)}
 .tgl{font-size:12px;padding:4px 11px;border-radius:6px;cursor:pointer;border:0.5px solid rgba(0,0,0,0.15);background:#fff;color:#888;font-family:inherit}
 .tgl.on{background:rgba(0,0,0,0.06);color:#3d3d3a}
-@media(prefers-color-scheme:dark){.tgl{background:#1a1a18;color:#888780;border-color:rgba(255,255,255,0.15)}.tgl.on{background:rgba(255,255,255,0.07);color:#c2c0b6}}
+body.dark .tgl{background:#1a1a18;color:#888780;border-color:rgba(255,255,255,0.15)}
+body.dark .tgl.on{background:rgba(255,255,255,0.07);color:#c2c0b6}
 .sind{font-size:12px;color:#aaa;white-space:nowrap}
 .krow{display:flex;align-items:center;gap:6px;margin-left:auto}
 .krow label{font-size:12px;color:#aaa}
 .krow span{font-size:12px;font-weight:500;min-width:14px}
 .epill{font-size:10px;padding:1px 7px;border-radius:20px;background:#dbeeff;color:#185FA5;margin-left:7px;vertical-align:middle;display:none}
-@media(prefers-color-scheme:dark){.epill{background:#0c447c33;color:#85B7EB}}
+body.dark .epill{background:#0c447c33;color:#85B7EB}
 .scenarios{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:.85rem}
 .sc-card{flex:1;min-width:160px;border:0.5px solid rgba(0,0,0,0.12);border-radius:10px;padding:10px 13px;cursor:pointer;transition:border-color .15s,background .15s;background:#fff}
 .sc-card:hover{background:rgba(0,0,0,0.03)}
 .sc-card.active{border-color:#534AB7;background:#EEEDFE}
-@media(prefers-color-scheme:dark){.sc-card{background:#1a1a18;border-color:rgba(255,255,255,0.12)}.sc-card:hover{background:rgba(255,255,255,0.04)}.sc-card.active{border-color:#7F77DD;background:rgba(38,33,92,0.3)}}
+body.dark .sc-card{background:#1a1a18;border-color:rgba(255,255,255,0.12)}
+body.dark .sc-card:hover{background:rgba(255,255,255,0.04)}
+body.dark .sc-card.active{border-color:#7F77DD;background:rgba(38,33,92,0.3)}
 .sc-tag{font-size:10px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:#888;margin-bottom:3px}
 .sc-title{font-size:13px;font-weight:500;color:#3d3d3a;margin-bottom:3px}
-@media(prefers-color-scheme:dark){.sc-title{color:#c2c0b6}}
+body.dark .sc-title{color:#c2c0b6}
 .sc-body{font-size:11px;color:#aaa;line-height:1.5}
 .sc-hint{font-size:10px;color:#999;font-style:italic;margin-top:5px;padding-top:5px;border-top:0.5px solid rgba(0,0,0,0.08)}
-@media(prefers-color-scheme:dark){.sc-hint{border-top-color:rgba(255,255,255,0.08)}}
+body.dark .sc-hint{border-top-color:rgba(255,255,255,0.08)}
 </style>
 </head>
 <body>
@@ -110,20 +116,34 @@ canvas{display:block;width:100%}
   <button class="tgl" id="trailBtn" onclick="toggleTrail()">Trails</button>
   <button class="tgl" id="playBtn" onclick="togglePlay()">Play</button>
   <button class="tgl" onclick="resetAll()">Reset all</button>
-  <div class="krow"><label>GNN k=</label><input type="range" id="ks" min="1" max="4" step="1" value="1" style="width:55px" oninput="onLayer(+this.value)"><span id="kv">1</span></div>
+  <button class="tgl" id="darkBtn" onclick="toggleDark()">Dark mode</button>
   <div class="krow"><label>kNN=</label><input type="range" id="knn" min="1" max="7" step="1" value="2" style="width:55px" oninput="onKnn(+this.value)"><span id="knnv">2</span></div>
 </div>
 
 <script>
-const dark=matchMedia('(prefers-color-scheme:dark)').matches;
-const BG=dark?'#1a1a18':'#fff';
-const FG=dark?'#c2c0b6':'#3d3d3a';
-const FGM=dark?'#666':'#aaa';
-const GR=dark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)';
-const BD=dark?'rgba(255,255,255,0.12)':'rgba(0,0,0,0.1)';
-const NC=dark?'#7F77DD':'#534AB7';
-const NL=dark?'#3C3489':'#EEEDFE';
+let dark=matchMedia('(prefers-color-scheme:dark)').matches;
+if(dark) document.body.classList.add('dark');
+
+let BG,FG,FGM,GR,BD,NC,NL;
+function refreshColors(){
+  BG=dark?'#1a1a18':'#fff';
+  FG=dark?'#c2c0b6':'#3d3d3a';
+  FGM=dark?'#666':'#aaa';
+  GR=dark?'rgba(255,255,255,0.05)':'rgba(0,0,0,0.05)';
+  BD=dark?'rgba(255,255,255,0.12)':'rgba(0,0,0,0.1)';
+  NC=dark?'#7F77DD':'#534AB7';
+  NL=dark?'#3C3489':'#EEEDFE';
+}
+refreshColors();
 const AC='#E24B4A';
+
+function toggleDark(){
+  dark=!dark;
+  document.body.classList.toggle('dark',dark);
+  refreshColors();
+  document.getElementById('darkBtn').classList.toggle('on',dark);
+  draw();
+}
 
 const NODES=[
   {id:0,lbl:'v0'},{id:1,lbl:'v1'},{id:2,lbl:'v2'},{id:3,lbl:'v3'},
@@ -159,9 +179,8 @@ function loadScenario(id){
   const sc=SCENARIOS[id];
   gpos=sc.gpos.map(p=>[...p]);
   ifeat=sc.feat.map(f=>[...f]);
-  curKNN=sc.knn;curK=sc.k;
+  curKNN=sc.knn;curK=1;
   curPass=0;curP=0;
-  document.getElementById('ks').value=curK;
   document.getElementById('knn').value=curKNN;
   document.querySelectorAll('.sc-card').forEach(el=>el.classList.remove('active'));
   document.getElementById('sc-'+id).classList.add('active');
@@ -459,7 +478,6 @@ function updateUI(){
   document.getElementById('sind').textContent=phaseLabel;
   document.getElementById('prevBtn').disabled=stepIdx()===0;
   document.getElementById('nextBtn').disabled=stepIdx()===totalSteps()-1;
-  document.getElementById('kv').textContent=curK;
   document.getElementById('trailBtn').className='tgl'+(trail?' on':'');
   document.getElementById('playBtn').textContent=playing?'Pause':'Play';
   document.getElementById('playBtn').className='tgl'+(playing?' on':'');
@@ -483,7 +501,6 @@ function navigate(d){
   const s=Math.max(0,Math.min(totalSteps()-1,stepIdx()+d));
   const {pass,p}=stepToPassPhase(s);curPass=pass;curP=p;startAnim();
 }
-function onLayer(v){curK=v;startAnim();}
 function onKnn(v){curKNN=v;startAnim();}
 function toggleTrail(){trail=!trail;draw();buildTL();}
 function resetAll(){loadScenario(curScenario);}
@@ -500,6 +517,7 @@ function togglePlay(){
 }
 window.addEventListener('resize',()=>{draw();});
 document.getElementById('sc-free').classList.add('active');
+if(dark) document.getElementById('darkBtn').classList.add('on');
 initDrags();startAnim();
 </script>
 </body>
